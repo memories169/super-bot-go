@@ -30,18 +30,25 @@ func HandleFFVPNStatusCommand(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 	ch := make(chan core.FFVPNInfo, 1)
 	core.GetFFVPNInfo(ctx, ch)
 	info := <-ch
-	if info.Error != "" {
-		edit := tgbotapi.NewEditMessageText(update.Message.Chat.ID, sent.MessageID, "❌ ffvpn: "+info.Error)
-		bot.Send(edit)
-		return
-	}
 
+	// Render, preferring an in-place edit of the "Đang tải..." message;
+	// any edit failure (stale message, rate limit, not-modified) falls back
+	// to sending a fresh panel message so the panel ALWAYS appears — a
+	// swallowed failure is what made the first /ffvpn look ignored.
 	text := FormatFFVPNMessage(info)
 	keyboard := CreateFFVPNKeyboard(info)
+	if info.Error != "" {
+		text = "❌ ffvpn: " + info.Error
+	}
 	edit := tgbotapi.NewEditMessageText(update.Message.Chat.ID, sent.MessageID, text)
 	edit.ParseMode = "Markdown"
 	edit.ReplyMarkup = &keyboard
-	bot.Send(edit)
+	if _, err := bot.Send(edit); err != nil {
+		fallback := tgbotapi.NewMessage(update.Message.Chat.ID, text)
+		fallback.ParseMode = "Markdown"
+		fallback.ReplyMarkup = &keyboard
+		bot.Send(fallback)
+	}
 }
 
 // HandleFFVPNButtonCallback handles "ffvpn|<host>" and "ffvpnrefresh".
@@ -88,7 +95,14 @@ func HandleFFVPNButtonCallback(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 	edit := tgbotapi.NewEditMessageText(callback.Message.Chat.ID, callback.Message.MessageID, text)
 	edit.ParseMode = "Markdown"
 	edit.ReplyMarkup = &keyboard
-	_, _ = bot.Send(edit) // ignore "message is not modified"
+	if _, err := bot.Send(edit); err != nil {
+		// Edited message may be gone/unmodified — send a fresh panel so the
+		// interaction never silently dies.
+		fallback := tgbotapi.NewMessage(callback.Message.Chat.ID, text)
+		fallback.ParseMode = "Markdown"
+		fallback.ReplyMarkup = &keyboard
+		bot.Send(fallback)
+	}
 }
 
 // ffvpnKeyboardForCallback renders the keyboard matching the callback:

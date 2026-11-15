@@ -98,8 +98,12 @@ func HandleFFVPNButtonClick(s *discordgo.Session, i *discordgo.InteractionCreate
 	}
 
 	embed := CreateFFVPNEmbed(info)
-	s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+	if _, err := s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
 		Embeds:     &[]*discordgo.MessageEmbed{embed},
 		Components: &components,
-	})
+	}); err != nil {
+		s.FollowupMessageCreate(i.Interaction, true, &discordgo.WebhookParams{
+			Embeds: []*discordgo.MessageEmbed{embed},
+		})
+	}
 }
