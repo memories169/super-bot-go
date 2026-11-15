@@ -74,6 +74,7 @@ func main() {
 	commands := []*discordgo.ApplicationCommand{
 		{Name: "status", Description: "Display server dashboard"},
 		{Name: "ping", Description: "Check bot latency"},
+		{Name: "ffvpn", Description: "FFVPN server list & switch"},
 	}
 	for _, cmd := range commands {
 		if _, err := dg.ApplicationCommandCreate(dg.State.User.ID, "", cmd); err != nil {

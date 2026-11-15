@@ -68,6 +68,10 @@ func main() {
 			Name:        "ping",
 			Description: "Check bot latency",
 		},
+		{
+			Name:        "ffvpn",
+			Description: "FFVPN server list & switch",
+		},
 	}
 
 	for _, cmd := range commands {
