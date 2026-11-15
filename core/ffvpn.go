@@ -24,12 +24,23 @@ import (
 //	POST /api/edges/select  — switch server
 //	GET  /api/edges/status  — current selection + proxy state + suspect flag
 
-var (
-	// FFVPNAPI is ffvpn's web console base URL, e.g. http://192.168.100.85:9090.
-	FFVPNAPI = os.Getenv("FFVPN_API")
-	// FFVPNKey is the FXVPN_INGEST_KEY value from ffvpn's .env.
-	FFVPNKey = os.Getenv("FFVPN_KEY")
-)
+// ffvpnAPI / ffvpnKey read the env AT CALL TIME. They must not be
+// captured in package-level vars: godotenv.Load() runs in config.go's
+// init(), and package-level var initializers execute BEFORE init()
+// functions — capturing at var-init would yield empty values whenever
+// the vars are supplied through a .env file.
+func ffvpnAPI() string {
+	api := os.Getenv("FFVPN_API")
+	return strings.TrimRight(api, "/")
+}
+
+func ffvpnKey() string {
+	return os.Getenv("FFVPN_KEY")
+}
+
+func ffvpnConfigured() bool {
+	return ffvpnAPI() != "" && ffvpnKey() != ""
+}
 
 // FFVPNEdge is one selectable MASQUE edge host.
 type FFVPNEdge struct {
@@ -68,16 +79,16 @@ func ffvpnLabel(e FFVPNEdge) string {
 // GetFFVPNInfo fetches edges + status; async channel style like GetSingboxInfo.
 func GetFFVPNInfo(ctx context.Context, resultChan chan<- FFVPNInfo) {
 	defer close(resultChan)
-	if FFVPNAPI == "" || FFVPNKey == "" {
+	if !ffvpnConfigured() {
 		resultChan <- FFVPNInfo{Error: "FFVPN_API / FFVPN_KEY not configured in .env"}
 		return
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(FFVPNAPI, "/")+"/api/edges", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ffvpnAPI()+"/api/edges", nil)
 	if err != nil {
 		resultChan <- FFVPNInfo{Error: err.Error()}
 		return
 	}
-	req.Header.Set("X-Ingest-Key", FFVPNKey)
+	req.Header.Set("X-Ingest-Key", ffvpnKey())
 	resp, err := ffvpnClient().Do(req)
 	if err != nil {
 		resultChan <- FFVPNInfo{Error: err.Error()}
@@ -153,8 +164,8 @@ func SwitchFFVPN(host string) error {
 
 // SwitchFFVPNEdge posts the full select payload for an edge.
 func SwitchFFVPNEdge(e FFVPNEdge) error {
-	if FFVPNAPI == "" || FFVPNKey == "" {
-		return fmt.Errorf("FFVPN_API / FFVPN_KEY not configured")
+	if !ffvpnConfigured() {
+		return fmt.Errorf("FFVPN_API / FFVPN_KEY not configured in .env")
 	}
 	body, _ := json.Marshal(map[string]any{
 		"country_code": e.CountryCode,
@@ -164,12 +175,12 @@ func SwitchFFVPNEdge(e FFVPNEdge) error {
 		"server_port":  e.ServerPort,
 	})
 	req, err := http.NewRequest(http.MethodPost,
-		strings.TrimRight(FFVPNAPI, "/")+"/api/edges/select", bytes.NewReader(body))
+		ffvpnAPI()+"/api/edges/select", bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Ingest-Key", FFVPNKey)
+	req.Header.Set("X-Ingest-Key", ffvpnKey())
 	resp, err := ffvpnClient().Do(req)
 	if err != nil {
 		return err
@@ -189,15 +200,15 @@ func SwitchFFVPNEdge(e FFVPNEdge) error {
 // GetFFVPNStatus fetches /api/edges/status for quick checks.
 func GetFFVPNStatus(ctx context.Context) (FFVPNStatus, error) {
 	var st FFVPNStatus
-	if FFVPNAPI == "" || FFVPNKey == "" {
-		return st, fmt.Errorf("FFVPN_API / FFVPN_KEY not configured")
+	if !ffvpnConfigured() {
+		return st, fmt.Errorf("FFVPN_API / FFVPN_KEY not configured in .env")
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
-		strings.TrimRight(FFVPNAPI, "/")+"/api/edges/status", nil)
+		ffvpnAPI()+"/api/edges/status", nil)
 	if err != nil {
 		return st, err
 	}
-	req.Header.Set("X-Ingest-Key", FFVPNKey)
+	req.Header.Set("X-Ingest-Key", ffvpnKey())
 	resp, err := ffvpnClient().Do(req)
 	if err != nil {
 		return st, err
