@@ -3,6 +3,7 @@ package bot
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 	"super-bot/core"
@@ -34,10 +35,16 @@ func HandleFFVPNStatusCommand(s *discordgo.Session, i *discordgo.InteractionCrea
 
 	embed := CreateFFVPNEmbed(info)
 	components := CreateFFVPNButtons(info)
-	s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+	if _, err := s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
 		Embeds:     &[]*discordgo.MessageEmbed{embed},
 		Components: &components,
-	})
+	}); err != nil {
+		log.Printf("ffvpn: initial edit failed: %v", err)
+		s.FollowupMessageCreate(i.Interaction, true, &discordgo.WebhookParams{
+			Embeds:     []*discordgo.MessageEmbed{embed},
+			Components: components,
+		})
+	}
 }
 
 // HandleFFVPNButtonClick handles "ffvpn_<host>" and "ffvpn_refresh".
@@ -48,10 +55,11 @@ func HandleFFVPNButtonClick(s *discordgo.Session, i *discordgo.InteractionCreate
 	})
 
 	// Payload routing:
-	//   ffvpn_e_<host>   — switch edge
+	//   ffvpn_e_<host>       — switch edge
 	//   ffvpn_k_<code>_<page> — expand country edges
-	//   ffvpn_p_<page>   — country page navigation
-	//   ffvpn_refresh    — re-render page 0
+	//   ffvpn_ke_<code>_<page> — edge page navigation inside a country
+	//   ffvpn_p_<page>       — country page navigation
+	//   ffvpn_refresh        — re-render page 0
 	switch {
 	case strings.HasPrefix(customID, "ffvpn_e_"):
 		host := strings.TrimPrefix(customID, "ffvpn_e_")
@@ -66,7 +74,7 @@ func HandleFFVPNButtonClick(s *discordgo.Session, i *discordgo.InteractionCreate
 			Content: fmt.Sprintf("✅ Đã chuyển sang %s", host),
 			Flags:   discordgo.MessageFlagsEphemeral,
 		})
-	case strings.HasPrefix(customID, "ffvpn_k_") || strings.HasPrefix(customID, "ffvpn_p_"):
+	case strings.HasPrefix(customID, "ffvpn_k_") || strings.HasPrefix(customID, "ffvpn_ke_") || strings.HasPrefix(customID, "ffvpn_p_"):
 		// navigation only — no switch, just re-render below
 	case customID == "ffvpn_refresh":
 		// re-render below
@@ -78,12 +86,19 @@ func HandleFFVPNButtonClick(s *discordgo.Session, i *discordgo.InteractionCreate
 	core.GetFFVPNInfo(ctx, ch)
 	info := <-ch
 	if info.Error != "" {
+		// Interaction is already deferred — editing with the error beats
+		// leaving the message stuck on "thinking" until timeout.
+		s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+			Content: stringPtr("❌ ffvpn: " + info.Error),
+		})
 		return
 	}
 
 	// Render the right view for this interaction.
 	components := CreateFFVPNButtons(info)
-	if strings.HasPrefix(customID, "ffvpn_k_") {
+	embed := CreateFFVPNEmbed(info)
+	switch {
+	case strings.HasPrefix(customID, "ffvpn_k_"):
 		rest := strings.TrimPrefix(customID, "ffvpn_k_")
 		parts := strings.SplitN(rest, "_", 2)
 		if len(parts) == 2 {
@@ -91,19 +106,29 @@ func HandleFFVPNButtonClick(s *discordgo.Session, i *discordgo.InteractionCreate
 			fmt.Sscanf(parts[1], "%d", &page)
 			components = CreateFFVPNEdgeButtonsD(info, parts[0], page)
 		}
-	} else if strings.HasPrefix(customID, "ffvpn_p_") {
+	case strings.HasPrefix(customID, "ffvpn_ke_"):
+		// Edge-page nav payload carries the country code.
+		rest := strings.TrimPrefix(customID, "ffvpn_ke_")
+		if idx := strings.LastIndexByte(rest, '_'); idx > 0 {
+			code, pageStr := rest[:idx], rest[idx+1:]
+			page := 0
+			fmt.Sscanf(pageStr, "%d", &page)
+			components = CreateFFVPNEdgeButtonsD(info, code, page)
+		}
+	case strings.HasPrefix(customID, "ffvpn_p_"):
 		page := 0
 		fmt.Sscanf(strings.TrimPrefix(customID, "ffvpn_p_"), "%d", &page)
 		components = ffvpnCountryButtonsD(info, page)
 	}
 
-	embed := CreateFFVPNEmbed(info)
 	if _, err := s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
 		Embeds:     &[]*discordgo.MessageEmbed{embed},
 		Components: &components,
 	}); err != nil {
+		log.Printf("ffvpn: interaction edit failed: %v", err)
 		s.FollowupMessageCreate(i.Interaction, true, &discordgo.WebhookParams{
-			Embeds: []*discordgo.MessageEmbed{embed},
+			Embeds:     []*discordgo.MessageEmbed{embed},
+			Components: components,
 		})
 	}
 }

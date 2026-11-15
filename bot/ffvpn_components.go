@@ -7,8 +7,16 @@ import (
 	"github.com/bwmarrin/discordgo"
 )
 
-// ffvpnCountriesPerPageD caps country buttons per Discord page.
-const ffvpnCountriesPerPageD = 25
+// Discord caps a message at 5 action rows (max 5 buttons per row).
+// Country pages therefore show 20 countries = 4 full rows, leaving the
+// 5th row for the nav buttons. The previous 25/page produced 6 rows and
+// Discord rejected the whole panel (400 Invalid Form Body) — the
+// interaction was already deferred, so it sat "thinking" until timeout.
+// Edge pages pack 5 edges per row, 20 per page, for the same reason.
+const (
+	ffvpnCountriesPerPageD = 20
+	ffvpnEdgesPerPageD     = 20
+)
 
 // groupCountriesByCodeD indexes edges by country code (preserving order).
 func groupCountriesByCodeD(info core.FFVPNInfo) ([]string, map[string][]core.FFVPNEdge) {
@@ -51,12 +59,7 @@ func ffvpnCountryButtonsD(info core.FFVPNInfo, page int) []discordgo.MessageComp
 		end = len(order)
 	}
 
-	shown := 0
 	for _, code := range order[start:end] {
-		if shown >= ffvpnCountriesPerPageD {
-			break
-		}
-		shown++
 		edges := byCode[code]
 		currentHere := false
 		for _, e := range edges {
@@ -126,7 +129,25 @@ func CreateFFVPNEdgeButtonsD(info core.FFVPNInfo, code string, page int) []disco
 	_, byCode := groupCountriesByCodeD(info)
 	var components []discordgo.MessageComponent
 	var row []discordgo.MessageComponent
-	for _, e := range byCode[code] {
+
+	edges := byCode[code]
+	pages := (len(edges) + ffvpnEdgesPerPageD - 1) / ffvpnEdgesPerPageD
+	if pages < 1 {
+		pages = 1
+	}
+	if page < 0 {
+		page = 0
+	}
+	if page >= pages {
+		page = pages - 1
+	}
+	start := page * ffvpnEdgesPerPageD
+	end := start + ffvpnEdgesPerPageD
+	if end > len(edges) {
+		end = len(edges)
+	}
+
+	for _, e := range edges[start:end] {
 		emoji := "🌐"
 		if e.ServerHost == info.Current.ServerHost {
 			emoji = "✅"
@@ -146,15 +167,26 @@ func CreateFFVPNEdgeButtonsD(info core.FFVPNInfo, code string, page int) []disco
 	if len(row) > 0 {
 		components = append(components, discordgo.ActionsRow{Components: row})
 	}
-	components = append(components, discordgo.ActionsRow{
-		Components: []discordgo.MessageComponent{
-			discordgo.Button{
-				Label:    "◀️ Quốc gia",
-				Style:    discordgo.PrimaryButton,
-				CustomID: fmt.Sprintf("ffvpn_p_%d", page),
-			},
-		},
+
+	var nav []discordgo.MessageComponent
+	if page > 0 {
+		nav = append(nav, discordgo.Button{
+			Label: "◀️ Trước", Style: discordgo.PrimaryButton,
+			CustomID: fmt.Sprintf("ffvpn_ke_%s_%d", code, page-1),
+		})
+	}
+	if page < pages-1 {
+		nav = append(nav, discordgo.Button{
+			Label: "Sau ▶️", Style: discordgo.PrimaryButton,
+			CustomID: fmt.Sprintf("ffvpn_ke_%s_%d", code, page+1),
+		})
+	}
+	nav = append(nav, discordgo.Button{
+		Label:    "◀️ Quốc gia",
+		Style:    discordgo.PrimaryButton,
+		CustomID: fmt.Sprintf("ffvpn_p_%d", page),
 	})
+	components = append(components, discordgo.ActionsRow{Components: nav})
 	return components
 }
 
